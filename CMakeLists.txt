@@ -708,6 +708,12 @@ if(ANDROID AND LIBRETRO)
 	target_link_libraries(${PROJECT_NAME} PRIVATE log)
 endif()
 
+if(ANDROID AND LIBRETRO)
+	# STV_FC_PGO_v1: con ThinLTO + PGO el arreglo estatico del JIT del DSP (DynCode) quedaba renombrado y sin definir
+	# al enlazar ("undefined hidden symbol aica::dsp::DynCode"). Ese archivo va sin LTO.
+	set_source_files_properties(core/hw/aica/dsp_arm64.cpp PROPERTIES COMPILE_OPTIONS "-fno-lto")
+endif()
+
 if(ASAN)
 	if(ANDROID)
 		target_compile_options(${PROJECT_NAME} PRIVATE -fsanitize=address -fno-omit-frame-pointer)

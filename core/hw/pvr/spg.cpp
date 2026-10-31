@@ -19,6 +19,7 @@ static bool stvMetricas() {
 	if (v < 0) { char b[PROP_VALUE_MAX] = {}; __system_property_get("debug.stv.fc.metricas", b); v = b[0] == '1'; }
 	return v == 1;
 }
+extern "C" int __llvm_profile_write_file(void) __attribute__((weak));	// PGO: solo existe en la lib instrumentada
 static double stvAhora() { timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec / 1e9; }
 static void stvVblank(bool pal) {
 	if (!stvMetricas()) return;
@@ -34,6 +35,11 @@ static void stvVblank(bool pal) {
 				vps, 100.0 * vps / (pal ? 50.0 : 59.94), (stvVaAciertos + stvVaFallos) / dt,
 				stvVaAciertos + stvVaFallos ? 100.0 * stvVaAciertos / (stvVaAciertos + stvVaFallos) : 0.0, stvVaVaciados / dt);
 		stvVaAciertos = stvVaFallos = stvVaVaciados = 0;
+		// PGO (solo en la lib instrumentada, -fprofile-generate): RetroArch muere con force-stop y el perfil se escribe al
+		// salir; se vuelca cada 30 s.
+		static int volcados = 0;
+		if (__llvm_profile_write_file != nullptr && ++volcados % 6 == 0)
+			__llvm_profile_write_file();
 		t0 = t; n = 0;
 	}
 }
