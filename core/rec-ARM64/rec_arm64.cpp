@@ -1179,7 +1179,9 @@ public:
 	{
 		Mov_2ops(w29, pc);
 		Str(w29, sh4_context_mem_operand(&sh4ctx.pc));
-		GenBranch((DynaCode *)destino->code);
+		// STV_FC_ENTRADA_v1: el pc ya es el vaddr del destino (rdv_LinkBlock lo exige): se entra despues de su
+		// verificacion de direccion. La del codigo (SMC) y la de la FPU, si las tiene, siguen.
+		GenBranch((DynaCode *)((u8 *)destino->code + destino->stvEntradaEnlace));
 	}
 
 	u32 RelinkBlock(RuntimeBlockInfo *block)
@@ -2110,6 +2112,7 @@ private:
 			Mov(w0, block->vaddr);
 			Mov(w1, block->addr);
 			GenCall(checkBlockAddr);
+			block->stvEntradaEnlace = GetBuffer()->GetCursorOffset();	// STV_FC_ENTRADA_v1
 		}
 
 		if (force_checks)

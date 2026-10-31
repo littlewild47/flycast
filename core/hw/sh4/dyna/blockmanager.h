@@ -39,6 +39,9 @@ struct RuntimeBlockInfo
 
 	u32 relink_offset;
 	u32 relink_data;
+	// STV_FC_ENTRADA_v1: desplazamiento (bytes) del codigo despues de la verificacion pc == vaddr de la MMU; un salto
+	// enlazado ya guardo ese pc y entra aca (rec-ARM64/rec_arm64.cpp). 0 = sin verificacion que saltear.
+	u32 stvEntradaEnlace = 0;
 
 	BlockEndType BlockType;
 	bool has_jcond;
