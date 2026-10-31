@@ -8,6 +8,31 @@
 #include "hw/pvr/Renderer_if.h"
 #include "stdclass.h"
 #include <array>
+#if defined(__ANDROID__)
+// STV_FC_METRICAS_v1 (STV OS): con debug.stv.fc.metricas=1, una linea "STVFC" cada 5 s en logcat con los vblank
+// emulados por segundo y la velocidad contra el reloj real (59,94 Hz NTSC / 50 Hz PAL).
+#include <android/log.h>
+#include <sys/system_properties.h>
+#include <time.h>
+static bool stvMetricas() {
+	static int v = -1;
+	if (v < 0) { char b[PROP_VALUE_MAX] = {}; __system_property_get("debug.stv.fc.metricas", b); v = b[0] == '1'; }
+	return v == 1;
+}
+static double stvAhora() { timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec / 1e9; }
+static void stvVblank(bool pal) {
+	if (!stvMetricas()) return;
+	static double t0 = 0; static int n = 0;
+	double t = stvAhora();
+	if (t0 == 0) { t0 = t; n = 0; return; }
+	n++;
+	if (t - t0 >= 5.0) {
+		double vps = n / (t - t0);
+		__android_log_print(ANDROID_LOG_INFO, "STVFC", "vblank/s %.2f velocidad %.1f %%", vps, 100.0 * vps / (pal ? 50.0 : 59.94));
+		t0 = t; n = 0;
+	}
+}
+#endif
 
 #ifdef TEST_AUTOMATION
 #include "input/gamepad_device.h"
@@ -163,6 +188,9 @@ static int spg_line_sched(int tag, int cycles, int jitter, void *arg)
 				SPG_STATUS.fieldnum = 0;
 
 			rend_vblank();
+#if defined(__ANDROID__)
+			stvVblank(SPG_CONTROL.PAL);
+#endif
 
 			u64 now = getTimeMs();
 			cpu_time_idx = (cpu_time_idx + 1) % cpu_cycles.size();

@@ -703,6 +703,11 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
 	target_link_libraries(${PROJECT_NAME} PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
+if(ANDROID AND LIBRETRO)
+	# STV_FC_METRICAS_v1: __android_log_print del instrumento de velocidad (core/hw/pvr/spg.cpp).
+	target_link_libraries(${PROJECT_NAME} PRIVATE log)
+endif()
+
 if(ASAN)
 	if(ANDROID)
 		target_compile_options(${PROJECT_NAME} PRIVATE -fsanitize=address -fno-omit-frame-pointer)
