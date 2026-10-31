@@ -189,6 +189,7 @@ bool UTLB_Sync(u32 entry)
 	lru_address = tlb_entry.Address.VPN << 10;
 
 	cache_entry(tlb_entry);
+	stvVaCacheFlush();	// STV_FC_VACACHE_v1
 
 	if (!mmu_enabled())
 	{
@@ -267,6 +268,7 @@ MmuError mmu_full_lookup(u32 va, const TLB_Entry** tlb_entry_ret, u32& rv)
 		rv = (entry.Data.PPN << 10) | (va & ~mmu_mask[sz]);
 
 		cache_entry(entry);
+		stvVaCacheFlush();	// STV_FC_VACACHE_v1
 
 		p_sh4rcb->cntx.cycle_counter -= 164;
 
@@ -330,6 +332,7 @@ template MmuError mmu_data_translation<MMU_TT_DWRITE>(u32 va, u32& rv);
 
 void mmu_flush_table()
 {
+	stvVaCacheFlush();	// STV_FC_VACACHE_v1
 	lru_entry = nullptr;
 	flush_cache();
 	mmuAddressLUTFlush(true);

@@ -61,6 +61,8 @@ void ITLB_Sync(u32 entry);
 bool mmu_match(u32 va, CCN_PTEH_type Address, CCN_PTEL_type Data);
 void mmu_set_state();
 void mmu_flush_table();
+// STV_FC_VACACHE_v1: vacia la cache "direccion virtual -> codigo" del despachador (hw/sh4/dyna/blockmanager.cpp).
+void stvVaCacheFlush();
 [[noreturn]] void mmu_raise_exception(MmuError mmu_error, u32 address, u32 am);
 
 static inline bool mmu_enabled()

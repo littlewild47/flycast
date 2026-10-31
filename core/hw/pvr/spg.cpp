@@ -28,7 +28,12 @@ static void stvVblank(bool pal) {
 	n++;
 	if (t - t0 >= 5.0) {
 		double vps = n / (t - t0);
-		__android_log_print(ANDROID_LOG_INFO, "STVFC", "vblank/s %.2f velocidad %.1f %%", vps, 100.0 * vps / (pal ? 50.0 : 59.94));
+		extern u64 stvVaAciertos, stvVaFallos, stvVaVaciados;
+		double dt = t - t0;
+		__android_log_print(ANDROID_LOG_INFO, "STVFC", "vblank/s %.2f velocidad %.1f %% | despachos/s %.0f aciertos %.1f %% vaciados/s %.0f",
+				vps, 100.0 * vps / (pal ? 50.0 : 59.94), (stvVaAciertos + stvVaFallos) / dt,
+				stvVaAciertos + stvVaFallos ? 100.0 * stvVaAciertos / (stvVaAciertos + stvVaFallos) : 0.0, stvVaVaciados / dt);
+		stvVaAciertos = stvVaFallos = stvVaVaciados = 0;
 		t0 = t; n = 0;
 	}
 }

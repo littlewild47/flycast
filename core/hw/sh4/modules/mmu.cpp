@@ -439,6 +439,7 @@ retry_ITLB_Match:
 
 void mmu_set_state()
 {
+	stvVaCacheFlush();	// STV_FC_VACACHE_v1
 	if (CCN_MMUCR.AT == 1)
 	{
 		// Detect if we're running Windows CE

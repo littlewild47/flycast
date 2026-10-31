@@ -54,6 +54,33 @@ static DynarecCodeEntryPtr DYNACALL bm_GetCode(u32 addr)
 
 // addr must be a virtual address
 // This returns an executable address
+// STV_FC_VACACHE_v1 (STV OS): con la MMU encendida (juegos de Windows CE) cada vuelta al despachador traducia la
+// direccion virtual por la MMU (mmu_full_lookup) y leia el codigo en FPCA, una tabla de ~64 MB indexada por direccion
+// fisica: un fallo de cache casi seguro en cada despacho. Medido en Sega Rally 2 sobre la TrimUI Smart Pro S (Cortex-A55):
+// 17,6 % + 9,1 % del hilo de emulacion. Esta cache chica (2048 entradas, 32 KB) recuerda "direccion virtual + ASID ->
+// codigo". Se vacia entera (stvVaGen++) ante cualquier cambio de bloques (alta, baja, reset) o del TLB (UTLB_Sync,
+// mmu_flush_table, mmu_set_state): la MMU rapida de Flycast tampoco revisa permisos al traducir instrucciones, asi
+// que una traduccion que dio bien sigue dando lo mismo mientras nada de eso cambie. Solo se guardan aciertos.
+struct StvVaEntry {
+	u32 va;
+	u32 asidGen;	// ASID (8 bits) | generacion << 8
+	DynarecCodeEntryPtr code;
+};
+static StvVaEntry stvVaCache[2048];
+u32 stvVaGen = 1;
+u64 stvVaAciertos, stvVaFallos, stvVaVaciados;	// para STV_FC_METRICAS_v1
+
+void stvVaCacheFlush()
+{
+	stvVaVaciados++;
+	stvVaGen = (stvVaGen + 1) & 0xffffff;
+	if (stvVaGen == 0)
+	{
+		memset(stvVaCache, 0, sizeof(stvVaCache));
+		stvVaGen = 1;
+	}
+}
+
 DynarecCodeEntryPtr DYNACALL bm_GetCodeByVAddr(u32 addr)
 {
 	if (!mmu_enabled())
@@ -141,15 +168,32 @@ DynarecCodeEntryPtr DYNACALL bm_GetCodeByVAddr(u32 addr)
 		addr = Sh4cntx.pc;
 	}
 
+	StvVaEntry& e = stvVaCache[(addr >> 1) & 2047];
+	const u32 tag = CCN_PTEH.ASID | (stvVaGen << 8);
+	if (e.va == addr && e.asidGen == tag)
+	{
+		stvVaAciertos++;
+		return e.code;
+	}
+	stvVaFallos++;
+
 	u32 paddr;
 	MmuError rv = mmu_instruction_translation(addr, paddr);
 	if (rv != MmuError::NONE)
 	{
 		DoMMUException(addr, rv, MMU_TT_IREAD);
 		mmu_instruction_translation(Sh4cntx.pc, paddr);
+		return bm_GetCode(paddr);
 	}
 
-	return bm_GetCode(paddr);
+	DynarecCodeEntryPtr code = bm_GetCode(paddr);
+	if (code != ngen_FailedToFindBlock)
+	{
+		e.va = addr;
+		e.asidGen = tag;
+		e.code = code;
+	}
+	return code;
 }
 
 // addr must be a physical address
@@ -221,6 +265,7 @@ void bm_AddBlock(RuntimeBlockInfo* blk)
 
 	verify((void*)bm_GetCode(block->addr) == (void*)ngen_FailedToFindBlock);
 	FPCA(block->addr) = (DynarecCodeEntryPtr)CC_RW2RX(block->code);
+	stvVaCacheFlush();	// STV_FC_VACACHE_v1
 
 #ifdef DYNA_OPROF
 	if (oprofHandle)
@@ -254,6 +299,7 @@ void bm_DiscardBlock(RuntimeBlockInfo* block)
 	// Remove from jump table
 	verify((void*)bm_GetCode(block_ptr->addr) == CC_RW2RX((void*)block_ptr->code));
 	FPCA(block_ptr->addr) = ngen_FailedToFindBlock;
+	stvVaCacheFlush();	// STV_FC_VACACHE_v1
 
 	if (block_ptr->temp_block)
 		all_temp_blocks.erase(block_ptr);
@@ -269,6 +315,7 @@ void bm_Periodical_1s()
 
 void bm_vmem_pagefill(void** ptr, u32 size_bytes)
 {
+	stvVaCacheFlush();	// STV_FC_VACACHE_v1
 	for (size_t i = 0; i < size_bytes / sizeof(ptr[0]); i++)
 	{
 		ptr[i]=(void*)ngen_FailedToFindBlock;
@@ -277,6 +324,7 @@ void bm_vmem_pagefill(void** ptr, u32 size_bytes)
 
 void bm_Reset()
 {
+	stvVaCacheFlush();	// STV_FC_VACACHE_v1
 	bm_CleanupDeletedBlocks();
 	protected_blocks = 0;
 	unprotected_blocks = 0;
@@ -326,6 +374,7 @@ void bm_UnlockPage(u32 addr, u32 size)
 
 void bm_ResetCache()
 {
+	stvVaCacheFlush();	// STV_FC_VACACHE_v1
 	sh4Dynarec->reset();
 	addrspace::bm_reset();
 
@@ -375,6 +424,7 @@ void bm_ResetTempCache(bool full)
 			blkmap.erase((void*)block->code);
 		}
 	}
+	stvVaCacheFlush();	// STV_FC_VACACHE_v1
 	del_blocks.insert(del_blocks.begin(),all_temp_blocks.begin(),all_temp_blocks.end());
 	all_temp_blocks.clear();
 }
