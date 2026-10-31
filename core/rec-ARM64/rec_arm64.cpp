@@ -1163,6 +1163,25 @@ public:
 			Nop();
 	}
 
+	// STV_FC_ENLACE_v1 (STV OS): con la MMU encendida Flycast no enlaza bloques y cada final de bloque vuelve al
+	// despachador (Sega Rally 2: ~7 millones de vueltas por segundo en la TrimUI Smart Pro S). Un salto estatico cuyo
+	// destino esta en la misma pagina de 1 KB (la pagina minima del SH4) que el inicio del bloque se traduce con la
+	// misma entrada del TLB que el propio bloque: su direccion fisica es block->addr + (destino - block->vaddr), sin
+	// pasar por la MMU, y el enlace sigue valiendo aunque cambie el TLB. Como con la MMU cada bloque verifica al
+	// entrar que pc == vaddr, el enlace guarda el pc del destino antes de saltar (mismas 4 instrucciones que los otros
+	// caminos). rdv_LinkBlock (driver.cpp) solo enlaza si el bloque destino fue compilado para esa misma direccion.
+	static bool stvEnlazable(const RuntimeBlockInfo *block, u32 destino)
+	{
+		return ((destino ^ block->vaddr) & ~0x3ffu) == 0;
+	}
+
+	void stvSaltoEnlazado(const RuntimeBlockInfo *destino, u32 pc)
+	{
+		Mov_2ops(w29, pc);
+		Str(w29, sh4_context_mem_operand(&sh4ctx.pc));
+		GenBranch((DynaCode *)destino->code);
+	}
+
 	u32 RelinkBlock(RuntimeBlockInfo *block)
 	{
 		ptrdiff_t start_offset = GetBuffer()->GetCursorOffset();
@@ -1174,7 +1193,9 @@ public:
 		case BET_StaticCall:
 			// next_pc = block->BranchBlock;
 #ifndef NO_BLOCK_LINKING
-			if (block->pBranchBlock != NULL)
+			if (block->pBranchBlock != NULL && mmu_enabled())
+				stvSaltoEnlazado(block->pBranchBlock, block->BranchBlock);
+			else if (block->pBranchBlock != NULL)
 			{
 				GenBranch((DynaCode *)block->pBranchBlock->code);
 				Nop();
@@ -1183,7 +1204,7 @@ public:
 			}
 			else
 			{
-				if (!mmu_enabled() && sh4ctx.CpuRunning)
+				if ((!mmu_enabled() || stvEnlazable(block, block->BranchBlock)) && sh4ctx.CpuRunning)
 				{
 					GenCall(linkBlockGenericStub);
 					Nop();
@@ -1220,7 +1241,9 @@ public:
 
 				B(ne, &branch_not_taken);
 #ifndef NO_BLOCK_LINKING
-				if (block->pBranchBlock != NULL)
+				if (block->pBranchBlock != NULL && mmu_enabled())
+					stvSaltoEnlazado(block->pBranchBlock, block->BranchBlock);
+				else if (block->pBranchBlock != NULL)
 				{
 					GenBranch((DynaCode *)block->pBranchBlock->code);
 					Nop();
@@ -1229,7 +1252,7 @@ public:
 				}
 				else
 				{
-					if (!mmu_enabled() && sh4ctx.CpuRunning)
+					if ((!mmu_enabled() || stvEnlazable(block, block->BranchBlock)) && sh4ctx.CpuRunning)
 					{
 						GenCall(linkBlockBranchStub);
 						Nop();
@@ -1250,7 +1273,9 @@ public:
 				Bind(&branch_not_taken);
 
 #ifndef NO_BLOCK_LINKING
-				if (block->pNextBlock != NULL)
+				if (block->pNextBlock != NULL && mmu_enabled())
+					stvSaltoEnlazado(block->pNextBlock, block->NextBlock);
+				else if (block->pNextBlock != NULL)
 				{
 					GenBranch((DynaCode *)block->pNextBlock->code);
 					Nop();
@@ -1259,7 +1284,7 @@ public:
 				}
 				else
 				{
-					if (!mmu_enabled() && sh4ctx.CpuRunning)
+					if ((!mmu_enabled() || stvEnlazable(block, block->NextBlock)) && sh4ctx.CpuRunning)
 					{
 						GenCall(linkBlockNextStub);
 						Nop();

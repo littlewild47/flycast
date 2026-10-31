@@ -246,7 +246,12 @@ static DynarecCodeEntryPtr findOrCompile()
 {
 	DynarecCodeEntryPtr rv = bm_GetCodeByVAddr(Sh4cntx.pc);  // Returns exec addr
 	if (rv == ngen_FailedToFindBlock)
-		rv = (DynarecCodeEntryPtr)CC_RW2RX(compilePC(0));  // Returns rw addr
+	{
+		DynarecCodeEntryPtr code = compilePC(0);  // Returns rw addr
+		// STV_FC_ENLACE_v1: con la MMU, compilar puede no dar codigo (la decodificacion disparo una excepcion y el pc ya
+		// es el del vector), igual que en rdv_FailedToFindBlock. Hasta el enlace con MMU esto no se alcanzaba.
+		rv = code == nullptr ? bm_GetCodeByVAddr(Sh4cntx.pc) : (DynarecCodeEntryPtr)CC_RW2RX(code);
+	}
 	
 	return rv;
 }
@@ -288,8 +293,20 @@ void* DYNACALL rdv_LinkBlock(u8* code,u32 dpc)
 
 	DynarecCodeEntryPtr rv = findOrCompile();  // Returns rx ptr
 
+	// STV_FC_ENLACE_v1 (ver RelinkBlock en rec-ARM64/rec_arm64.cpp): con la MMU solo se enlazan los saltos estaticos
+	// dentro de la misma pagina de 1 KB, buscando el destino por su direccion fisica (la del bloque mas el
+	// desplazamiento) y solo si el bloque destino fue compilado para esa misma direccion virtual.
+	RuntimeBlockInfo* stvDestino = nullptr;
 	if (mmu_enabled())
-		return (void *)rv;
+	{
+		// Compilar pudo vaciar la cache de bloques (rbi ya no existe) o desviar el pc a una excepcion: sin enlace.
+		if (stale_block || bcls == BET_CLS_Dynamic || ((Sh4cntx.pc ^ rbi->vaddr) & ~0x3ffu) != 0
+				|| bm_GetBlock(code) != rbi)
+			return (void *)rv;
+		stvDestino = bm_GetBlock(rbi->addr + (Sh4cntx.pc - rbi->vaddr)).get();
+		if (stvDestino == nullptr || stvDestino->vaddr != Sh4cntx.pc)
+			return (void *)rv;
+	}
 	if (!stale_block)
 	{
 		if (bcls == BET_CLS_Dynamic)
@@ -310,7 +327,7 @@ void* DYNACALL rdv_LinkBlock(u8* code,u32 dpc)
 		}
 		else
 		{
-			RuntimeBlockInfo* nxt = bm_GetBlock(Sh4cntx.pc).get();
+			RuntimeBlockInfo* nxt = stvDestino != nullptr ? stvDestino : bm_GetBlock(Sh4cntx.pc).get();
 
 			if (rbi->BranchBlock == Sh4cntx.pc)
 				rbi->pBranchBlock = nxt;
